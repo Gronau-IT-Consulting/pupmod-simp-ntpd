@@ -60,6 +60,18 @@ class ntpd (
   Boolean                        $disable_monitor = true
 ){
 
+  if $facts['os']['name'] in ['RedHat','CentOS'] {
+    $_ntp_package = 'ntp'
+    $_ntp_service = 'ntpd'
+  }
+  elsif $facts['os']['name'] in ['Debian','Ubuntu'] {
+    $_ntp_package = 'ntp'
+    $_ntp_service = 'ntp'
+  }
+  else {
+    fail("OS '${facts['os']['name']}' not supported by '${module_name}'")
+  }
+
   if $auditd {
     include '::auditd'
     # Add the audit rules
@@ -79,8 +91,8 @@ class ntpd (
     mode           => '0600',
     ensure_newline => true,
     warn           => true,
-    require        => Package['ntp'],
-    notify         => Service['ntpd']
+    require        => Package[$_ntp_package],
+    notify         => Service[$_ntp_service]
   }
 
   concat::fragment { 'main_ntp_configuration':
@@ -94,7 +106,7 @@ class ntpd (
     owner  => 'root',
     group  => 'root',
     mode   => '0755',
-    notify => Service['ntpd']
+    notify => Service[$_ntp_service]
   }
 
   file { '/etc/ntp/keys':
@@ -102,7 +114,7 @@ class ntpd (
     group   => 'root',
     mode    => '0600',
     content => "\n",
-    notify  => Service['ntpd']
+    notify  => Service[$_ntp_service]
   }
 
   file { '/var/lib/ntp':
@@ -110,44 +122,74 @@ class ntpd (
     owner  => 'ntp',
     group  => 'ntp',
     mode   => '0750',
-    notify => Service['ntpd']
+    notify => Service[$_ntp_service]
   }
 
-  file { '/etc/sysconfig/ntpd':
-    ensure  => 'file',
-    owner   => 'root',
-    group   => 'root',
-    mode    => '0640',
-    content => "OPTIONS=\"-A -u ntp:ntp -p /var/run/ntpd.pid\"
+  if $facts['os']['name'] in ['RedHat','CentOS'] {
+    file { '/etc/sysconfig/ntpd':
+      ensure  => 'file',
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0640',
+      content => "OPTIONS=\"-A -u ntp:ntp -p /var/run/ntpd.pid\"
 SYNC_HWCLOCK=yes\n",
-    notify  => Service['ntpd']
+      notify  => Service[$_ntp_service]
+    }
+
+    group { 'ntp':
+      ensure    => 'present',
+      allowdupe => false,
+      gid       => 38,
+      before    => Service[$_ntp_service]
+    }
+
+    user { 'ntp':
+      ensure     => 'present',
+      allowdupe  => false,
+      gid        => 'ntp',
+      home       => '/etc/ntp',
+      membership => 'inclusive',
+      shell      => '/sbin/nologin',
+      uid        => 38,
+      before     => Service[$_ntp_service]
+    }
+  }
+  elsif $facts['os']['name'] in ['Debian','Ubuntu'] {
+    file { '/etc/default/ntp':
+      ensure  => 'file',
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0644',
+      content => "NTPD_OPTS='-g'\n",
+      notify  => Service[$_ntp_service]
+    }
+
+    # User ang group are automatically create on package install
+    group { 'ntp':
+      ensure    => 'present',
+      allowdupe => false,
+      before    => Service[$_ntp_service],
+      require   => Package[$_ntp_package]
+    }
+    user { 'ntp':
+      ensure    => 'present',
+      allowdupe => false,
+      shell     => '/usr/sbin/nologin',
+      before    => Service[$_ntp_service],
+      require   => Package[$_ntp_package]
+    }
+  }
+  else {
+    fail("OS '${facts['os']['name']}' not supported by '${module_name}'")
   }
 
-  group { 'ntp':
-    ensure    => 'present',
-    allowdupe => false,
-    gid       => 38,
-    before    => Service['ntpd']
-  }
+  package { $_ntp_package: ensure => latest }
 
-  package { 'ntp': ensure => latest }
-
-  service { 'ntpd':
+  service { $_ntp_service:
     ensure     => running,
     enable     => true,
     hasrestart => true,
     hasstatus  => true,
-    require    => Package['ntp']
-  }
-
-  user { 'ntp':
-    ensure     => 'present',
-    allowdupe  => false,
-    gid        => 'ntp',
-    home       => '/etc/ntp',
-    membership => 'inclusive',
-    shell      => '/sbin/nologin',
-    uid        => 38,
-    before     => Service['ntpd']
+    require    => Package[$_ntp_package]
   }
 }
